@@ -1,0 +1,9 @@
+user009 30
+user001 30
+user003 22
+user002 55
+user006 90
+user007 70
+user008 66
+user005 87
+user004 43

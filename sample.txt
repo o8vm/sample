@@ -1,0 +1,9 @@
+user009	500	kani
+user001	100	apple
+user003	455	book
+user002	300	pen
+user006	1000	pc
+user007	18000	keyboard
+user008	20000	book
+user005	600	orange
+user004	45	banana
