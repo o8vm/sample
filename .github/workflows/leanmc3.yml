@@ -1,8 +1,5 @@
 name: LeanMC 3 CI
 on:
-  push:
-    branches:
-      - automation/leanmc-3-ci
   workflow_dispatch:
 permissions:
   contents: read
