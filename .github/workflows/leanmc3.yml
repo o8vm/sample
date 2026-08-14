@@ -1,0 +1,101 @@
+name: LeanMC 3 CI
+on:
+  push:
+    branches:
+      - automation/leanmc-3-ci
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source
+        run: |
+          set -euxo pipefail
+          cat payload/part-* | base64 -d > leanmc-3.0.0-source.tar.gz
+          mkdir -p work
+          tar -xzf leanmc-3.0.0-source.tar.gz -C work
+      - name: Install elan and Lean
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.33.0
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          cd work/leanmc-3.0.0
+          mkdir -p artifacts
+          lean --version | tee artifacts/lean-version.log
+          lake --version | tee artifacts/lake-version.log
+          lake build 2>&1 | tee artifacts/clean-build.log
+          lake exe leanmc_tests 2>&1 | tee artifacts/test-run.log
+          lake env lean Tests/Integrated3.lean 2>&1 | tee artifacts/integrated3.log
+          lake env lean Tests/Audit.lean 2>&1 | tee artifacts/axiom-audit-3.log
+          ! grep -Rnw --include='*.lean' -E '\b(sorry|admit|axiom)\b' LeanMC Tests
+      - name: Negative proof tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          cd work/leanmc-3.0.0
+          for f in Tests/ShouldReject*.lean; do
+            if lake env lean "$f" >"artifacts/$(basename "$f").log" 2>&1; then
+              echo "expected rejection but succeeded: $f"
+              exit 1
+            fi
+          done
+      - name: Package validated source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd work
+          rm -rf leanmc-3.0.0/.lake
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib
+          root = Path('leanmc-3.0.0')
+          out = Path('leanmc-industrial-model-checker-3.0.0.zip')
+          with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for p in sorted(root.rglob('*')):
+                  if not p.is_file():
+                      continue
+                  info = zipfile.ZipInfo(str(Path('leanmc-3.0.0') / p.relative_to(root)))
+                  info.date_time = (1980,1,1,0,0,0)
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  mode = 0o755 if p.suffix == '.sh' else 0o644
+                  info.external_attr = (mode & 0xffff) << 16
+                  z.writestr(info, p.read_bytes())
+          digest = hashlib.sha256(out.read_bytes()).hexdigest()
+          Path(str(out)+'.sha256').write_text(f'{digest}  {out.name}\n')
+          PY
+          unzip -t leanmc-industrial-model-checker-3.0.0.zip | tee leanmc-3.0.0-zip-test.log
+          cat > leanmc-industrial-model-checker-3.0.0-validation-report.txt <<REPORT
+          LeanMC 3.0.0 validation
+          status: passed
+          toolchain: leanprover/lean4:v4.33.0
+          lake build: passed
+          leanmc_tests: passed
+          integrated capability test: passed
+          axiom audit module: passed
+          negative proof tests: passed
+          proof-hole scan: passed
+          zip integrity: passed
+          REPORT
+          cp leanmc-3.0.0/artifacts/clean-build.log leanmc-3.0.0-clean-rebuild.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leanmc-3.0.0-validated
+          path: |
+            work/leanmc-industrial-model-checker-3.0.0.zip
+            work/leanmc-industrial-model-checker-3.0.0.zip.sha256
+            work/leanmc-industrial-model-checker-3.0.0-validation-report.txt
+            work/leanmc-3.0.0-clean-rebuild.log
+            work/leanmc-3.0.0-zip-test.log
+          if-no-files-found: error
+          compression-level: 0
